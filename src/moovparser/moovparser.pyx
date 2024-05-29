@@ -43,13 +43,13 @@ cdef cython.bint is_atom(const unsigned char* data, const unsigned char* atom_ty
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
+# @cython.initializedcheck(False)
 cpdef Node parse_nodes(const unsigned char[:] data):
     cdef:
         Node moov
         Py_ssize_t p = 0
         Py_ssize_t moov_size = 0
         const cython.uchar* moov_n = b"moov"
-        const cython.uchar* mchn_ptr = b"mvhdtrak"
     for p in range(data.shape[0]-4):
         if is_atom(&data[p], moov_n):
             break
@@ -60,7 +60,8 @@ cpdef Node parse_nodes(const unsigned char[:] data):
     cdef:
         const unsigned char* atom_type
         const unsigned char[:] atom_type0 = b""
-        uint8_t atom_index
+        const cython.uchar* mchn_ptr = b"mvhdtrak"
+        uint8_t atom_index = 0
     for p in  range(moov.size-4):
         for atom_index in range(2):
             atom_type = mchn_ptr + atom_index*4
