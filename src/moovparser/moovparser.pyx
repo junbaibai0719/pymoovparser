@@ -1,25 +1,24 @@
-# cython: language_level=3
+# cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False
 from libc.stdio cimport printf
 from libc.stdint cimport uint8_t, uint32_t, int32_t
 cimport cython
 
 cdef class Node:
     cdef:
-        bytes name
+        const unsigned char[:] name
         const unsigned char* data
         Py_ssize_t size
         Py_ssize_t begin
-        list[Node] children
+        Node next
 
     def __cinit__(self):
-        self.children = []
+        self.next = None
     
     def __repr__(self):
         cdef list res = []
-        res.append(f"name:{self.name}, size:{self.size}, start:{self.begin}")
-        if self.children:
-            for child in self.children:
-                res.append(f"  {child.__repr__()}")
+        res.append(f"name:{bytes(self.name).decode()}, size:{self.size}, start:{self.begin}")
+        if self.next:
+            res.append(self.next.__repr__())
         return "\n".join(res)
 
     @staticmethod
@@ -40,34 +39,62 @@ cdef cython.bint is_atom(const unsigned char* data, const unsigned char* atom_ty
     return data[0] == atom_type[0] and data[1] == atom_type[1] and data[2] == atom_type[2] and data[3] == atom_type[3]
 
 
+cdef extern from *:
+    """
+    const unsigned char* mchn_ptr[] = {"mvhd", "trak"};
+    const unsigned char* all_atom_names[] = {"moov", "mvhd", "trak",
+    "prfl",
+    "tkhd",
+    "tapt",
+    "clip",
+    "matt",
+    "edts",
+    "tref",
+    "txas",
+    "load",
+    "imap",
+    "mdia",
+    "mdhd", "elng", "hdlr", "minf", "udta",
+    "stbl" ,"stsd", "stts", "ctts", "cslg", "stco", "stsc", "stsz"
+    };
+    """
+    cdef const unsigned char** mchn_ptr
+    cdef const unsigned char** all_atom_names
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
+# @cython.boundscheck(False)
+# @cython.wraparound(False)
 # @cython.initializedcheck(False)
 cpdef Node parse_nodes(const unsigned char[:] data):
     cdef:
-        Node moov
+        Node root = None
+        Node node = None
         Py_ssize_t p = 0
-        Py_ssize_t moov_size = 0
-        const cython.uchar* moov_n = b"moov"
-    for p in range(data.shape[0]-4):
-        if is_atom(&data[p], moov_n):
+        const cython.uchar** atom_name_ptr = NULL
+    for p in range(data.shape[0]):
+        if is_atom(&data[p], b"moov"):
             break
-    moov_size = char2int32(&data[p-4])
-    moov = Node.New(&data[p:p+4][0], &data[p-4], moov_size, p-4)
-    if moov.begin+moov.size > data.shape[0]:
-        raise Exception("incompleted moov")
-    cdef:
-        const unsigned char* atom_type
-        const unsigned char[:] atom_type0 = b""
-        const cython.uchar* mchn_ptr = b"mvhdtrak"
-        uint8_t atom_index = 0
-    for p in  range(moov.size-4):
-        for atom_index in range(2):
-            atom_type = mchn_ptr + atom_index*4
-            if is_atom(moov.data+p, atom_type):
-                node = Node.New(atom_type, moov.data+p-4, char2int32(&moov.data[p-4]), moov.begin+p-4)
-                moov.children.append(node)
+    if p >= data.shape[0]:
+        raise Exception("no moov")
+    if p>=4:
+        p-=4
+    # if root.begin+root.size > data.shape[0]:
+    #     raise Exception("incompleted moov")
+    while p < data.shape[0]-4:
+        atom_name_ptr = all_atom_names
+        while atom_name_ptr[0]:
+            if is_atom(&data[p], atom_name_ptr[0]):
                 break
-    return moov
+            atom_name_ptr+=1
+        if atom_name_ptr[0]:
+            if node is not None:
+                node.next = Node.New(atom_name_ptr[0], &data[p-4], char2int32(&data[p-4]), p-4)
+                node = node.next
+            if root is None: 
+                root = Node.New(atom_name_ptr[0], &data[p-4], char2int32(&data[p-4]), p-4)
+                node = root
+        p+=1      
+        if is_atom(&node.name[0], b"udta"):
+            p+=node.size-1
+
+    return root
 
