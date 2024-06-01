@@ -1,6 +1,8 @@
 # cython: language_level=3, boundscheck=False, wraparound=False, initializedcheck=False
 from libc.stdio cimport printf
 from libc.stdint cimport uint8_t, uint32_t, int32_t
+from libc.stdlib cimport malloc, free
+from libc.string cimport memcpy
 cimport cython
 
 cdef class Node:
@@ -140,21 +142,25 @@ cdef void parse_stsz(const unsigned char[:] data):
 # @cython.boundscheck(False)
 # @cython.wraparound(False)
 # @cython.initializedcheck(False)
-cpdef Node parse_nodes(const unsigned char[:] data):
+cpdef Node parse_nodes(const unsigned char[:] raw_data):
     cdef:
         Node root = None
         Node node = None
         Py_ssize_t p = 0
+        Py_ssize_t moov_begin = 0
         const unsigned char** atom_name_ptr = NULL
-    for p in range(data.shape[0]):
-        if is_atom(&data[p], b"moov"):
+        const unsigned char[:] data
+    
+    for p in range(raw_data.shape[0]):
+        if is_atom(&raw_data[p], b"moov"):
             break
-    if p >= data.shape[0]:
+    if p >= raw_data.shape[0]:
         raise Exception("no moov")
     if p>=4:
         p-=4
-    # if root.begin+root.size > data.shape[0]:
-    #     raise Exception("incompleted moov")
+    data = raw_data[p:].copy()
+    moov_begin = p
+    p = 0
     while p < data.shape[0]-4:
         atom_name_ptr = all_atom_names
         while atom_name_ptr[0]:
@@ -163,7 +169,7 @@ cpdef Node parse_nodes(const unsigned char[:] data):
             atom_name_ptr+=1
         if atom_name_ptr[0]:
             if node is not None:
-                node.next = Node.New(atom_name_ptr[0], data[p-4:p-4+char2int32(&data[p-4])], p-4)
+                node.next = Node.New(atom_name_ptr[0], data[p-4:p-4+char2int32(&data[p-4])], moov_begin+p-4)
                 node = node.next
                 if is_atom(&node.name[0], b"stsc"):
                     parse_stsc(node.data[:])      
@@ -174,7 +180,7 @@ cpdef Node parse_nodes(const unsigned char[:] data):
                 if is_atom(&node.name[0], b"stsz"):
                     parse_stsz(node.data[:])
             if root is None: 
-                root = Node.New(atom_name_ptr[0], data[p-4:p-4+char2int32(&data[p-4])], p-4)
+                root = Node.New(atom_name_ptr[0], data[p-4:p-4+char2int32(&data[p-4])], moov_begin+p-4)
                 node = root
         p+=1
 
