@@ -69,8 +69,10 @@ cdef class FrameFinder:
                 lo = mid + 1
             else:
                 hi = mid
-        return lo
-    
+        if lo < self.pre_sum_stsc.shape[0]:
+            return char2int32(&self.stsc.data[16 + lo * 12])
+        return -1
+
     def __repr__(self):
         cdef:
             list pre_nums = []
@@ -168,14 +170,14 @@ cdef void parse_stco(const unsigned char[:] data):
         int32_t entry_start = 0
         int entry_size = 4
     
-    # printf("size: %d\n", char2int32(&data[0]))
-    # printf("type: %s\n", &data[4:8][0])
-    # printf("version: %d\n", data[8])
-    # printf("flags: %d\n", data[9:12])
-    # printf("entry count: %d\n", char2int32(&data[12]))
+    printf("size: %d\n", char2int32(&data[0]))
+    printf("type: %s\n", &data[4:8][0])
+    printf("version: %d\n", data[8])
+    printf("flags: %d\n", data[9:12])
+    printf("entry count: %d\n", char2int32(&data[12]))
     for entry_num in range(char2int32(&data[12])):
         entry_start = 16 + entry_num * entry_size
-        # printf("chunk offset: %d\n", char2int32(&data[entry_start]))
+        printf("chunk offset: %d\n", char2int32(&data[entry_start]))
 
 cdef void parse_stsz(const unsigned char[:] data):
     cdef:
@@ -240,7 +242,7 @@ cpdef Node parse_nodes(const unsigned char[:] raw_data):
                         # parse_stsc(node.data[:])      
                     if is_atom(&node.name[0], b"stco"):
                         stco = node
-                        # parse_stco(node.data[:])
+                        parse_stco(node.data[:])
                     if is_atom(&node.name[0], b"stsz"):
                         stsz = node
                         # parse_stsz(node.data[:])
