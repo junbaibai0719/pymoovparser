@@ -40,8 +40,16 @@ cdef class FrameFinder:
         Node stsc
         Node stsz
         int32_t[::1] pre_sum_stsc
+    
+    def __cinit__(self, Node stco, Node stsc, Node stsz):
+        self.stco = stco
+        self.stsc = stsc
+        self.stsz = stsz
+        self.init_pre_sum_stsc()
 
     cdef void init_pre_sum_stsc(self):
+        if self.stsc is None:
+            raise ValueError("stsc is None")
         cdef:
             int32_t entry_num = 0
             int32_t entry_start = 0
@@ -80,16 +88,6 @@ cdef class FrameFinder:
         for i in range(self.pre_sum_stsc.shape[0]):
             pre_nums.append(str(self.pre_sum_stsc[i]))
         return ",".join(pre_nums)
-
-    @staticmethod
-    cdef FrameFinder New(Node stco, Node stsc, Node stsz):
-        cdef FrameFinder finder = FrameFinder.__new__(FrameFinder)
-        finder.stco = stco
-        finder.stsc = stsc
-        finder.stsz = stsz
-        finder.init_pre_sum_stsc()
-        return finder
-
 
 # @cython.boundscheck(False)
 cdef int32_t char2int32(const unsigned char* data) noexcept:
@@ -257,7 +255,7 @@ cpdef Node parse_nodes(const unsigned char[:] raw_data):
         if is_atom(&node.name[0], b"udta"):
             p+=node.data.shape[0]-1
     if stsc is not None and stsz is not None and stco is not None:
-        frame_finder = FrameFinder.New(stco, stsc, stsz)
+        frame_finder = FrameFinder(stco, stsc, stsz)
     print(frame_finder)
     print(frame_finder.find_frame_index(0))
     print(frame_finder.find_frame_index(18))
