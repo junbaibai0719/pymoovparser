@@ -110,7 +110,7 @@ cdef class FrameFinder:
             int32_t i = 0
             int32_t frame_size = 0
         if chunk_no > 0:
-            chunk_first_frame = self.pre_sum_stsc[chunk_no]
+            chunk_first_frame = self.pre_sum_stsc[chunk_no-1]
         for i in range(chunk_first_frame, frame):
             frame_offset_from_chunk += char2int32(&self.stsz.data[20 + i * 4])
         offset = chunk_offset + frame_offset_from_chunk
