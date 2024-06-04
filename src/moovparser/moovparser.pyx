@@ -56,30 +56,66 @@ cdef class FrameFinder:
             int entry_size = 12
             int32_t pre_sum = 0
             int32_t entry_count = char2int32(&self.stsc.data[12])
+            int32_t chunk_count = char2int32(&self.stco.data[12])
+            int32_t chunk_id = 0
+            int32_t last_chunk_id = 0
             array.array template = array.array("l", [])
-        self.pre_sum_stsc = array.clone(template, entry_count, zero=False)
-        printf("entry_count: %d\n", entry_count)
+ 
+        self.pre_sum_stsc = array.clone(template, chunk_count, zero=False)
+ 
+        # printf("size: %d\n", char2int32(&self.stsc.data[0]))
+        # printf("type: %s\n", &self.stsc.data[4:8][0])
+        # printf("version: %d\n", self.stsc.data[8])
+        # printf("flags: %d\n", self.stsc.data[9:12])
+        # printf("entry count: %d\n", char2int32(&self.stsc.data[12]))
+        cdef int32_t c = 0
         for entry_num in range(entry_count):
             entry_start = 16 + entry_num * entry_size
+            chunk_id = char2int32(&self.stsc.data[entry_start])
+            if chunk_id > 1:
+                last_chunk_id = char2int32(&self.stsc.data[entry_start - 12])
+            for c in range(last_chunk_id, chunk_id - 1):
+                pre_sum += char2int32(&self.stsc.data[entry_start - 8])
+                self.pre_sum_stsc[c] = pre_sum
             pre_sum += char2int32(&self.stsc.data[entry_start + 4])
-            printf("stsc: %d\n", char2int32(&self.stsc.data[entry_start + 4]))
-            self.pre_sum_stsc[entry_num] = pre_sum
+            self.pre_sum_stsc[chunk_id-1] = pre_sum
+            
+
     
-    cpdef int32_t find_frame_index(self, int32_t frame_index):
+    cdef int32_t chunkno_of_frame(self, int32_t frame):
         cdef:
             int32_t lo = 0
             int32_t hi = self.pre_sum_stsc.shape[0]
             int32_t mid
-        # bisect left 
+        # bisect right 
         while lo < hi:
             mid = (lo + hi) // 2
-            if self.pre_sum_stsc[mid] < frame_index:
-                lo = mid + 1
-            else:
+            if self.pre_sum_stsc[mid] > frame:
                 hi = mid
+            else:
+                lo = mid + 1
         if lo < self.pre_sum_stsc.shape[0]:
-            return char2int32(&self.stsc.data[16 + lo * 12])
+            return lo
         return -1
+    
+    cpdef (int32_t, int32_t) frame_pos(self, int32_t frame):
+        if frame < 0 or frame >= self.pre_sum_stsc[self.pre_sum_stsc.shape[0]-1]:
+            return -1, -1
+        cdef:
+            int32_t chunk_no = self.chunkno_of_frame(frame)
+            int32_t chunk_offset = char2int32(&self.stco.data[16 + chunk_no * 4])
+            int32_t chunk_first_frame = 0
+            int32_t frame_offset_from_chunk = 0
+            int32_t offset = 0
+            int32_t i = 0
+            int32_t frame_size = 0
+        if chunk_no > 0:
+            chunk_first_frame = self.pre_sum_stsc[chunk_no]
+        for i in range(chunk_first_frame, frame):
+            frame_offset_from_chunk += char2int32(&self.stsz.data[20 + i * 4])
+        offset = chunk_offset + frame_offset_from_chunk
+        frame_size = char2int32(&self.stsz.data[20 + frame * 4])
+        return offset, frame_size
 
     def __repr__(self):
         cdef:
@@ -139,28 +175,6 @@ cdef void parse_stsc(const unsigned char[:] data):
         # printf("samples description id: %d\n", char2int32(&data[entry_start+8]))
         frame_num += char2int32(&data[entry_start+4])
     # printf("frame num: %d\n", frame_num)
-
-cdef bint parse_stsd_is_mp4a(const unsigned char[:] data):
-    cdef:
-        int32_t entry_num = 0
-        int32_t entry_start = 0
-        int entry_size = 16
-        int i = 0
-    # printf("size: %d\n", char2int32(&data[0]))
-    # printf("type: %s\n", &data[4:8][0])
-    # printf("version: %d\n", data[8])
-    # printf("flags: %d\n", data[9:12])
-    # printf("entry count: %d\n", char2int32(&data[12]))
-    
-    for entry_num in range(1):
-        entry_start = 16 + entry_num * entry_size
-        # printf("Sample description size: %d\n", char2int32(&data[entry_start]))
-        # printf("Data format: %s\n", &data[entry_start+4])
-        return is_atom(&data[entry_start+4], b"mp4a")
-        # for i in range(6):    
-        #     printf("Reserved: %d\n", data[entry_start+8+i])
-        # printf("Data reference index: %d\n", data[entry_start+14] << 8 | data[entry_start+15])
-        
 
 cdef void parse_stco(const unsigned char[:] data):
     cdef:
@@ -243,9 +257,9 @@ cpdef Node parse_nodes(const unsigned char[:] raw_data):
                         parse_stco(node.data[:])
                     if is_atom(&node.name[0], b"stsz"):
                         stsz = node
-                        # parse_stsz(node.data[:])
+                        parse_stsz(node.data[:])
                 if is_atom(&node.name[0], b"stsd"):
-                    found_mp4a = parse_stsd_is_mp4a(node.data[:])
+                    found_mp4a = is_atom(&node.data[20], b"mp4a")
                 
             if root is None: 
                 root = Node.New(atom_name_ptr[0], data[p-4:p-4+char2int32(&data[p-4])], moov_begin+p-4)
@@ -256,13 +270,5 @@ cpdef Node parse_nodes(const unsigned char[:] raw_data):
             p+=node.data.shape[0]-1
     if stsc is not None and stsz is not None and stco is not None:
         frame_finder = FrameFinder(stco, stsc, stsz)
-    print(frame_finder)
-    print(frame_finder.find_frame_index(0))
-    print(frame_finder.find_frame_index(18))
-    print(frame_finder.find_frame_index(19))
-    print(frame_finder.find_frame_index(80))
-    print(frame_finder.find_frame_index(300))
-    print(frame_finder.find_frame_index(312))
-    print(frame_finder.find_frame_index(313))
     return root
 
